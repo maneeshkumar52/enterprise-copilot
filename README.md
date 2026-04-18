@@ -1,132 +1,122 @@
 # Enterprise Copilot
 
-Professional-grade enterprise knowledge assistant system designed for production-style development with clear service boundaries, repeatable setup, and deterministic execution steps.
+![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-## 1. Executive Overview
+Enterprise AI copilot platform with tenant-isolated retrieval, conversation memory, multi-source document indexing (Confluence, SharePoint), and JWT authentication — powered by Azure OpenAI, Azure AI Search, and Cosmos DB.
 
-This repository provides:
-- A FastAPI service entrypoint for API-first integration
-- Structured modules for orchestration, domain logic, and integrations
-- Test scaffolding for incremental quality assurance
-- Environment-driven configuration for local, staging, and production workflows
+## Architecture
 
-## 2. Architecture
-
-### 2.1 Logical Architecture
-
-```txt
-Client / Integrator
-      |
-      v
-FastAPI API Layer (Uvicorn)
-      |
-      +--> Application Layer (routing, orchestration)
-      +--> Domain Layer (business rules)
-      +--> Integration Layer (Azure/OpenAI/search/messaging)
-      +--> Data/State Layer (configured adapters)
+```
+Enterprise Knowledge Sources
+├── Confluence ──► confluence_connector.py
+├── SharePoint ──► sharepoint_connector.py
+└── Documents  ──► index_documents.py
+        │
+        ▼
+Azure AI Search (tenant-isolated vector index)
+        │
+        ▼
+┌───────────────────────────────────────┐
+│  FastAPI Service (:8000)              │
+│                                       │
+│  Auth ──► JWT + Entra tenant ID      │
+│       │                               │
+│  TenantIsolatedRetriever ──► Search  │──► Tenant-scoped hybrid search
+│       │                               │
+│  UserMemoryManager ──► Cosmos DB     │──► Conversation history per user
+│       │                               │
+│  MemoryAugmentedGenerator ──► GPT-4o │──► Context-aware answers
+└───────────────────────────────────────┘
 ```
 
-### 2.2 Runtime Components
-- API Server: FastAPI + Uvicorn
-- Configuration: environment variables and .env file
-- External Integrations: enabled per environment
-- Validation: pytest + e2e demo script
+## Key Features
 
-## 3. Repository Structure
+- **Tenant Isolation** — `TenantIsolatedRetriever` enforces strict data boundaries per Entra tenant ID
+- **Conversation Memory** — `UserMemoryManager` stores per-user conversation history in Cosmos DB for context continuity
+- **Memory-Augmented Generation** — `MemoryAugmentedGenerator` combines retrieved documents + conversation history for contextual answers
+- **Multi-Source Indexing** — Connectors for Confluence, SharePoint, and direct document upload
+- **JWT + Entra Auth** — Token-based authentication with Azure Entra tenant validation
+- **Hybrid Search** — Vector similarity + keyword matching via Azure AI Search
 
-```txt
+## Step-by-Step Flow
+
+### Step 1: Knowledge Ingestion
+Run connectors (`confluence_connector.py`, `sharepoint_connector.py`) or `index_documents.py` to ingest and index enterprise documents, tagged with tenant_id.
+
+### Step 2: User Authentication
+User authenticates with JWT. `get_current_user()` validates the token and extracts `TenantUserContext` (tenant_id, user_id, roles).
+
+### Step 3: Query Submission
+User sends a question via the API.
+
+### Step 4: Tenant-Scoped Retrieval
+`TenantIsolatedRetriever` searches Azure AI Search with a tenant_id filter, ensuring users only access their organization's knowledge.
+
+### Step 5: Memory Lookup
+`UserMemoryManager` fetches the user's recent conversation history from Cosmos DB.
+
+### Step 6: Augmented Generation
+`MemoryAugmentedGenerator` combines retrieved documents + conversation memory + current query, sending the full context to GPT-4o.
+
+## Repository Structure
+
+```
 enterprise-copilot/
-  src/ or orchestrator/
-  tests/
-  infra/
-  requirements.txt
-  demo_e2e.py
+├── src/
+│   ├── main.py              # FastAPI entry point
+│   ├── tenant_retriever.py   # TenantIsolatedRetriever
+│   ├── memory.py             # UserMemoryManager (Cosmos DB)
+│   ├── generator.py          # MemoryAugmentedGenerator
+│   ├── auth.py               # JWT + Entra authentication
+│   ├── models.py             # QueryRequest, CopilotResponse, TenantUserContext
+│   └── config.py             # Environment settings
+├── indexer/
+│   ├── index_documents.py
+│   ├── confluence_connector.py
+│   └── sharepoint_connector.py
+├── tests/
+│   └── test_memory.py
+├── infra/
+│   ├── Dockerfile
+│   └── azure-deploy.sh
+├── demo_e2e.py
+├── requirements.txt
+└── .env.example
 ```
 
-## 4. Prerequisites
-
-- Python 3.10+
-- pip 23+
-- Git
-- Optional cloud credentials for enabled connectors
-
-## 5. Local Setup
-
-1. Clone repository
+## Quick Start
 
 ```bash
 git clone https://github.com/maneeshkumar52/enterprise-copilot.git
 cd enterprise-copilot
-```
-
-2. Create virtual environment
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-3. Install dependencies
-
-```bash
-pip install --upgrade pip
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-4. Configure environment
-
-```bash
-cp .env.example .env 2>/dev/null || true
-```
-
-## 6. Run the Service
-
-```bash
+cp .env.example .env   # Configure Azure credentials
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Service endpoints:
-- API docs: http://127.0.0.1:8000/docs
-- OpenAPI JSON: http://127.0.0.1:8000/openapi.json
+## Configuration
 
-## 7. Validation and Test Flow
+| Variable | Description |
+|----------|-------------|
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint |
+| `AZURE_OPENAI_DEPLOYMENT` | Model deployment (gpt-4o) |
+| `AZURE_SEARCH_ENDPOINT` | Azure AI Search endpoint |
+| `AZURE_SEARCH_INDEX_NAME` | Index (enterprise-knowledge) |
+| `COSMOS_ENDPOINT` | Cosmos DB for conversation memory |
+| `COSMOS_MEMORY_CONTAINER` | Memory container (user-memory) |
+| `ENTRA_TENANT_ID` | Azure Entra tenant ID |
+| `JWT_SECRET` | JWT signing secret |
 
-1. Syntax validation
-
-```bash
-python3 -m compileall -q .
-```
-
-2. Unit/integration tests
+## Testing
 
 ```bash
 pytest -q
-```
-
-3. End-to-end demo
-
-```bash
 python demo_e2e.py
 ```
 
-## 8. Troubleshooting
+## License
 
-- Import or module errors:
-  - Ensure .venv is active
-  - Reinstall dependencies
-- Port already in use:
-  - Change --port value
-- Cloud connector failures:
-  - Validate credentials and service endpoints in .env
-
-## 9. Production Readiness Checklist
-
-- [ ] Environment variables externalized
-- [ ] Secrets not committed
-- [ ] Logging and tracing enabled
-- [ ] Test suite green in CI
-- [ ] Health checks configured in deployment
-
-## 10. License
-
-See LICENSE in this repository.
+MIT
